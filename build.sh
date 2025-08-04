@@ -1,3 +1,3 @@
 #!/bin/sh
 
-gcc main.c -lraylib -o app
+gcc main.c -lraylib -o filewiz

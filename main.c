@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <errno.h>
 
 // Getting home directory
@@ -11,11 +12,17 @@
 #define CLAY_IMPLEMENTATION
 #include "clay.h"
 
+#define BOTTOM_BAR
 #define INIT_SCRW 900
 #define INIT_SCRH 600
 #define CLR_BG {0, 0, 0, 255}
 #define CLR_TXT {255, 255, 255, 255}
+#define CLR_SELECT {0, 255, 255, 255}
 #define CLR_TXT_LNK {0, 150, 255, 255}
+#define CLR_TXT_BLK {255, 255, 0, 255}
+#define CLR_TXT_SCK {128, 0, 0, 255}
+#define CLR_TXT_PIP {255, 0, 0, 255}
+#define CLR_TXT_CHR {0, 255, 0, 255}
 #define CLR_TXT_DIR {255, 0, 255, 255}
 #define CLR_BG_TOPBAR {255, 255, 255, 255}
 #define CLR_TXT_TOPBAR {0, 0, 0, 255}
@@ -30,11 +37,36 @@
 #define CLR_HOVER(c1,c2) (Clay_Hovered() ? (Clay_Color) c1 : (Clay_Color) c2)
 
 #define CURPATH_SIZE 1024
-#define MESSAGE_SIZE 256
+#define MESSAGE_SIZE  256
+#define TOFREE_SIZE 10000
+#define TOFREE_NAMELEN 256
 
 char curpath[CURPATH_SIZE];
 char message[MESSAGE_SIZE];
+char tofree[TOFREE_SIZE][TOFREE_NAMELEN] = {0};
 bool hidemode = true;
+int numfiles = 0;
+
+/*
+void
+tofree(struct tofree tfr) {
+    static size_t freestrs_sz = 0;
+    
+    // Free all
+    if (tfr.str == NULL) {
+        for (int i = 0; i < freestrs_sz; i++)
+            free(freestrs[i].tfr);
+        free(freestrs);
+        freestrs_sz = 0;
+        return;
+    }
+
+
+    // Append to list
+    freestrs = realloc(freestrs, (++freestrs_sz)*sizeof(char*));
+    freestrs[freestrs_sz-1] = str;
+}
+*/
 
 void
 errorhandle(Clay_ErrorData errdat) {
@@ -89,26 +121,23 @@ closecurdir(DIR **dirp) {
     }
 }
 
-void backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata);
+void
+backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata);
+
 
 void
-entryhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
-    if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
-
-    DIR **dirp = (DIR**)userdata;
-    char *dest = clstr2str(elementid.stringId);
-
+advance(DIR **dirp, const char *dest) {
     char *pathcpy = malloc(CURPATH_SIZE);
     strncpy(pathcpy, curpath, CURPATH_SIZE-1);
 
     strncat(pathcpy, dest, CURPATH_SIZE-1);
     strncat(pathcpy, "/", CURPATH_SIZE-1);
 
-    free(dest);
-
+    printf("Advancing to '%s'\n", pathcpy);
     DIR *new = opendir(pathcpy); 
     if (new == NULL) {
         perror("opendir()");
+        strncpy(message, strerror(errno), MESSAGE_SIZE-1);
         free(pathcpy);
         return;
     }
@@ -120,13 +149,21 @@ entryhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t user
 }
 
 void
-backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
+entryhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
     if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
 
+    DIR **dirp = (DIR**)userdata;
+    char *dest = clstr2str(elementid.stringId);
+
+    advance(dirp, dest);
+
+    free(dest);
+}
+
+void goback(DIR **dirp) {
     // Nowhere to go back to
     if (strlen(curpath) == 1) return;
 
-    DIR **dirp = (DIR**)userdata;
     closecurdir(dirp);
 
     char *p = curpath + strlen(curpath) - 1;
@@ -136,14 +173,21 @@ backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userd
     *(p+1) = 0;
 
     opencurdir(dirp);
-}
+
+    strncpy(message, "Navigated BACK", MESSAGE_SIZE-1);
+ }
 
 void
-homehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
+backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
     if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
 
     DIR **dirp = (DIR**)userdata;
 
+    goback(dirp);
+}
+
+void
+gohome(DIR **dirp) {
     closecurdir(dirp);
 
     struct passwd *pw = getpwuid(getuid());
@@ -155,45 +199,82 @@ homehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userd
 }
 
 void
-hidehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
+homehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
     if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
+
+    DIR **dirp = (DIR**)userdata;
+    gohome(dirp);
+}
+
+void togglehide(void) {
+
+    if (hidemode)
+        strncpy(message, "Hide mode OFF", MESSAGE_SIZE-1);
+    else
+        strncpy(message, "Hide mode ON", MESSAGE_SIZE-1);
 
     hidemode = !hidemode;
 }
 
 void
-fileentry(DIR **dirp, const char *str, unsigned char type) {
+hidehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
+    if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
+
+    togglehide();
+}
+
+void
+fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
     //bool isStaticallyAllocated;
     //int32_t length;
     //// The underlying character memory. Note: this will not be copied and will not extend the lifetime of the underlying memory.
     //const char *chars;
-    
     if (!strcmp(str, ".")) return;
     if (!strcmp(str, "..")) return;
 
     if (hidemode && *str == '.') return;
+    //printf("FE: '%s'\n", str);
 
     Clay_Color clr = CLR_TXT;
     if (type == DT_DIR)
         clr = (Clay_Color) CLR_TXT_DIR;
     if (type == DT_LNK)
         clr = (Clay_Color) CLR_TXT_LNK;
+    if (type == DT_BLK)
+        clr = (Clay_Color) CLR_TXT_BLK;
+    if (type == DT_SOCK)
+        clr = (Clay_Color) CLR_TXT_SCK;
+    if (type == DT_FIFO)
+        clr = (Clay_Color) CLR_TXT_PIP;
+    if (type == DT_CHR) 
+        clr = (Clay_Color) CLR_TXT_CHR;
 
-    CLAY({.id = CLAY_SID(((Clay_String){.length = strlen(str), .chars = str})),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0, 50)}, .padding = 16},
-          .backgroundColor = CLR_HOVER(CLR_BG_HOVER, CLR_BG)}) {
+    strcpy(tofree[ord], str);
+    
+    CLAY({.id = CLAY_SID(((Clay_String){.length = strlen(str), .chars = tofree[ord]})),
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0, 50)},
+          //.padding = Clay_Hovered() ? 48 : 16
+          .padding = 16
+          },
+            //.backgroundColor = CLR_HOVER(CLR_BG_HOVER, CLR_BG)
+            .backgroundColor = CLR_BG,
+            //.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_HOVER(CLR_SELECT, CLR_TXT)}
+          }) {
 
         Clay_OnHover(entryhandle, (intptr_t)dirp);
         CLAY_TEXT(
-            ((Clay_String){.length = strlen(str), .chars = str}),
-            CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_HOVER(CLR_TXT_HOVER, clr)})
+            ((Clay_String){.length = strlen(str), .chars = tofree[ord]}),
+            CLAY_TEXT_CONFIG({.fontSize = 24,
+                .textColor = (Clay_Hovered()) ? (Clay_Color)CLR_SELECT: clr
+                //.textColor = clr
+            })
         );
     }
 }
 
 void
 fileentries(DIR **dirp) {
-    CLAY({.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT}, .id = CLAY_ID("FileListing"), .layout = {
+    CLAY({/*.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},*/ .id = CLAY_ID("FileListing"), .layout = {
             .layoutDirection = CLAY_TOP_TO_BOTTOM,
             .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
             //.padding = CLAY_PADDING_ALL(16),
@@ -208,11 +289,13 @@ fileentries(DIR **dirp) {
         
         errno = 0;
         struct dirent *dire = readdir(*dirp);
-
+        int i = 0;
         while (dire != NULL) {
-            fileentry(dirp, dire->d_name, dire->d_type);
+            fileentry(dirp, dire->d_name, dire->d_type, i);
             dire = readdir(*dirp);
+            i++;
         }
+        numfiles = i - 2;
 
         if (errno) {
             perror("readdir()");
@@ -222,17 +305,32 @@ fileentries(DIR **dirp) {
     }
 }
 
+void
+makedir(const char *name) {
+    char *path = malloc(strlen(curpath) + strlen(name) + 1);
+    strcpy(path, curpath);
+    strcat(path, name);
+
+    if (mkdir(path, 0755)) {
+        perror("mkdir()");
+    }
+
+    free(path);
+}
+
 int
 main(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(INIT_SCRW, INIT_SCRH, "App Window");
     SetTargetFPS(60);
+    SetExitKey(0);
 
     Font font = LoadFontEx("CascadiaCode.ttf", 32, 0, 250);
     SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
     SetTextLineSpacing(16);
 
-    Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(Clay_MinMemorySize(), malloc(Clay_MinMemorySize()));
+    const size_t memory = Clay_MinMemorySize();
+    Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(memory, malloc(memory));
     Clay_Initialize(arena, (Clay_Dimensions){INIT_SCRW, INIT_SCRH}, (Clay_ErrorHandler){errorhandle});
     Clay_SetMeasureTextFunction(measuretext, &font);
 
@@ -245,12 +343,65 @@ main(void) {
         exit(1);
     }
 
+    char inputbuf[256] = {0};
+    bool make_dir = false;
+    bool input_mode = false;
+
     while (!WindowShouldClose()) {
         Clay_SetLayoutDimensions((Clay_Dimensions){GetScreenWidth(), GetScreenHeight()});
         Clay_SetPointerState((Clay_Vector2){GetMousePosition().x, GetMousePosition().y}, IsMouseButtonPressed(MOUSE_BUTTON_LEFT));
         Clay_UpdateScrollContainers(false, (Clay_Vector2){0, GetMouseWheelMove()*MOUSE_SCROLL_SENSITIVITY}, GetFrameTime());
 
         Clay_BeginLayout();
+
+        if (input_mode) {
+            int key = GetCharPressed();
+            while (key > 0) {
+                if ((key >= 32) && (key <= 125) && (strlen(inputbuf) < 255)) {
+                    const int ln = strlen(inputbuf);
+                    inputbuf[ln] = key;
+                    inputbuf[ln+1] = 0;
+                }
+                key = GetCharPressed();
+            }
+
+            if (IsKeyPressed(KEY_BACKSPACE)) {
+                if (strlen(inputbuf))
+                    inputbuf[strlen(inputbuf)-1] = 0;
+            }
+
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                input_mode = false;
+                memset(inputbuf, 0, 256);
+            }
+            
+            if (IsKeyPressed(KEY_ENTER)) {
+                input_mode = false;
+                if (make_dir) {
+                    makedir(inputbuf);
+                }
+                memset(inputbuf, 0, 256);
+            }
+        }
+        else {
+            if (IsKeyPressed(KEY_A)) {
+                goback(&dir);
+            }
+            else if (IsKeyPressed(KEY_W)) {
+                gohome(&dir);
+            }
+            else if (IsKeyPressed(KEY_S)) {
+                togglehide();
+            }
+            // Create directory
+            else if(IsKeyPressed(KEY_E)) {
+                input_mode = true;
+                make_dir = true;
+            }
+        }
+
+        char numfiles_str[256];
+        snprintf(numfiles_str, 256, "%d", numfiles);
 
         CLAY({.id = CLAY_ID("OuterContainer"),
               .layout = {
@@ -293,6 +444,13 @@ main(void) {
                         CLAY_TEXT(CLAY_STRING("."), CLAY_TEXT_CONFIG({.fontSize = 24,
                                     .textColor = CLR_HOVER(CLR_TXT_TOPBAR_HOVER, CLR_TXT_TOPBAR)}));
                     }
+                    CLAY({.layout = {
+                            .sizing = {CLAY_SIZING_GROW(0, 30*7), CLAY_SIZING_GROW(0)},
+                            .padding = {8, 8, 0, 0}
+                         }, .backgroundColor = CLR_BG_TOPBAR}) {
+                        CLAY_TEXT(((Clay_String){.length = strlen(numfiles_str), .chars = numfiles_str}),
+                                CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT_TOPBAR}));
+                    }
                 }
 
                 CLAY_TEXT(((Clay_String){.length = strlen(curpath), .chars = curpath}), CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT_TOPBAR}));
@@ -300,13 +458,29 @@ main(void) {
 
 
             fileentries(&dir);
+            
+            if (input_mode)
+            CLAY({//.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
+                  .floating = {.attachPoints = {.parent = CLAY_ATTACH_POINT_CENTER_CENTER,
+                               .element = CLAY_ATTACH_POINT_CENTER_CENTER},
+                               .attachTo = CLAY_ATTACH_TO_PARENT
+                              },
+                  .layout = {
+                    .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
+                    .padding = {16, 16, 0, 0}
+                 }}) {
+                 CLAY_TEXT(((Clay_String){.chars = inputbuf, .length = strlen(inputbuf)}),
+                         CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT}));
+            }
 
+#ifdef BOTTOM_BAR
             CLAY({.id = CLAY_ID("BottomBar"), .layout = {
                     .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(24)},
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
-                 }, .backgroundColor = (Clay_Color)CLR_BG}) {
-                CLAY_TEXT(((Clay_String){.length = strlen(curpath), .chars = message}), CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT}));
+                 }, .backgroundColor = (Clay_Color)CLR_BG, .border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT}}) {
+                CLAY_TEXT(((Clay_String){.length = strlen(message), .chars = message}), CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT}));
             }
+#endif
         };
 
         Clay_RenderCommandArray rendercomm = Clay_EndLayout();
