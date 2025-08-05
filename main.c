@@ -15,8 +15,10 @@
 #define BOTTOM_BAR
 #define INIT_SCRW 900
 #define INIT_SCRH 600
-#define CLR_BG {0, 0, 0, 255}
-#define CLR_TXT {255, 255, 255, 255}
+#define FONT_SIZE 26
+#define TEXT_SPACING 1
+#define CLR_BG /*{69, 46, 46, 255}*/{0, 0, 0, 255}
+#define CLR_TXT {255,255,255,255}//{230, 225, 196, 255}
 #define CLR_SELECT {0, 255, 255, 255}
 #define CLR_TXT_LNK {0, 150, 255, 255}
 #define CLR_TXT_BLK {255, 255, 0, 255}
@@ -31,20 +33,29 @@
 #define CLR_BG_TOPBAR_HOVER {0, 0, 0, 255}
 #define CLR_TXT_TOPBAR_HOVER {255, 255, 255, 255}
 
+#define CLR_TXT_TODEL {255, 0, 50, 255}
+#define CLR_TXT_MAKEDIR CLR_TXT_DIR    
+
 #define MOUSE_SCROLL_SENSITIVITY 5
 
 #define COLOR_CL2R(cc) (Color){.r=cc.r,.g=cc.g,.b=cc.b,.a=cc.a}
 #define CLR_HOVER(c1,c2) (Clay_Hovered() ? (Clay_Color) c1 : (Clay_Color) c2)
 
+//NOTE: this adds up to quite big
+//memory usage (a few MBs). We need
+//to optimize this.
 #define CURPATH_SIZE 1024
 #define MESSAGE_SIZE  256
 #define TOFREE_SIZE 10000
 #define TOFREE_NAMELEN 256
+#define CHOSEN_SIZE 256
 
 char curpath[CURPATH_SIZE];
 char message[MESSAGE_SIZE];
 char tofree[TOFREE_SIZE][TOFREE_NAMELEN] = {0};
+char chosen[CHOSEN_SIZE] = {0};
 bool hidemode = true;
+bool choosemode = false;
 int numfiles = 0;
 
 /*
@@ -90,15 +101,21 @@ clstr2str(Clay_String clstr) {
 
 static inline Clay_Dimensions
 measuretext(Clay_StringSlice text, Clay_TextElementConfig *config, void *userData) {
+    //FIXME: both of these methods return slightly incorrect results.
+    //The first one, for some reason, returns more length than there is,
+    //and the second one accumulates insufficience of length
+
+
     //// Note: only monospace fonts
     //Clay_Dimensions fuckyourmomcanyouprovideproperfuckinggoddamndocsqqq = (Clay_Dimensions) {
     //        .width = text.length * config->fontSize,
     //        .height = config->fontSize
     //};
     //return fuckyourmomcanyouprovideproperfuckinggoddamndocsqqq;
+    
     const Font *font = (Font*)userData;
     char *str = slice2str(text);
-    const Vector2 measure = MeasureTextEx(*font, slice2str(text), config->fontSize, 1);
+    const Vector2 measure = MeasureTextEx(*font, slice2str(text), config->fontSize, TEXT_SPACING);
     free(str);
 
     return (Clay_Dimensions) {.width = measure.x, .height = measure.y};
@@ -133,7 +150,7 @@ advance(DIR **dirp, const char *dest) {
     strncat(pathcpy, dest, CURPATH_SIZE-1);
     strncat(pathcpy, "/", CURPATH_SIZE-1);
 
-    printf("Advancing to '%s'\n", pathcpy);
+    //printf("Advancing to '%s'\n", pathcpy);
     DIR *new = opendir(pathcpy); 
     if (new == NULL) {
         perror("opendir()");
@@ -155,12 +172,14 @@ entryhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t user
     DIR **dirp = (DIR**)userdata;
     char *dest = clstr2str(elementid.stringId);
 
-    advance(dirp, dest);
+    if (choosemode) strncpy(chosen, dest, CHOSEN_SIZE);
+    else advance(dirp, dest);
 
     free(dest);
 }
 
-void goback(DIR **dirp) {
+void
+goback(DIR **dirp) {
     // Nowhere to go back to
     if (strlen(curpath) == 1) return;
 
@@ -206,7 +225,8 @@ homehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userd
     gohome(dirp);
 }
 
-void togglehide(void) {
+void
+togglehide(void) {
 
     if (hidemode)
         strncpy(message, "Hide mode OFF", MESSAGE_SIZE-1);
@@ -225,10 +245,6 @@ hidehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userd
 
 void
 fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
-    //bool isStaticallyAllocated;
-    //int32_t length;
-    //// The underlying character memory. Note: this will not be copied and will not extend the lifetime of the underlying memory.
-    //const char *chars;
     if (!strcmp(str, ".")) return;
     if (!strcmp(str, "..")) return;
 
@@ -252,9 +268,10 @@ fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
     strcpy(tofree[ord], str);
     
     CLAY({.id = CLAY_SID(((Clay_String){.length = strlen(str), .chars = tofree[ord]})),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0, 50)},
-          //.padding = Clay_Hovered() ? 48 : 16
-          .padding = 16
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(FONT_SIZE+2, FONT_SIZE+10)},
+          //.padding = Clay_Hovered() ? 48 : 16,
+          .padding = 16,
+          .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}
           },
             //.backgroundColor = CLR_HOVER(CLR_BG_HOVER, CLR_BG)
             .backgroundColor = CLR_BG,
@@ -264,8 +281,8 @@ fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
         Clay_OnHover(entryhandle, (intptr_t)dirp);
         CLAY_TEXT(
             ((Clay_String){.length = strlen(str), .chars = tofree[ord]}),
-            CLAY_TEXT_CONFIG({.fontSize = 24,
-                .textColor = (Clay_Hovered()) ? (Clay_Color)CLR_SELECT: clr
+            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE,
+                .textColor = (Clay_Hovered()/*||!strcmp(cursel, tofree[ord])*/) ? (Clay_Color)CLR_SELECT: clr
                 //.textColor = clr
             })
         );
@@ -274,15 +291,18 @@ fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
 
 void
 fileentries(DIR **dirp) {
-    CLAY({/*.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},*/ .id = CLAY_ID("FileListing"), .layout = {
-            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-            .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
-            //.padding = CLAY_PADDING_ALL(16),
+    CLAY({//.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
+            .id = CLAY_ID("FileListing"),
+            .layout = {
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
+                //.padding = {64,0,0,0},
             //.childGap = 16
-         }, .clip = {
-            .vertical = true,
-            .childOffset = Clay_GetScrollOffset()
-         },
+            },
+            .clip = {
+                .vertical = true,
+                .childOffset = Clay_GetScrollOffset()
+            },
          .backgroundColor = (Clay_Color)CLR_BG}) {
 
         rewinddir(*dirp);
@@ -313,6 +333,7 @@ makedir(const char *name) {
 
     if (mkdir(path, 0755)) {
         perror("mkdir()");
+        strncpy(message, strerror(errno), MESSAGE_SIZE);
     }
 
     free(path);
@@ -325,9 +346,13 @@ main(void) {
     SetTargetFPS(60);
     SetExitKey(0);
 
-    Font font = LoadFontEx("CascadiaCode.ttf", 32, 0, 250);
-    SetTextureFilter(font.texture, TEXTURE_FILTER_BILINEAR);
-    SetTextLineSpacing(16);
+    // I'm not sure if 4800 is a correct number, but cyrillic
+    // doesn't work with smaller numbers. I guess this is the amount 
+    // of glyphs to load, and default (0) doesn't load
+    // cyrillics.
+    Font font = LoadFontEx("CascadiaCode.ttf", FONT_SIZE, NULL, 4800);
+    //SetTextureFilter(font.texture, /*TEXTURE_FILTER_BILINEAR*/TEXTURE_FILTER_POINT);
+    //SetTextLineSpacing(16);
 
     const size_t memory = Clay_MinMemorySize();
     Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(memory, malloc(memory));
@@ -346,6 +371,7 @@ main(void) {
     char inputbuf[256] = {0};
     bool make_dir = false;
     bool input_mode = false;
+    bool del_mode = false;
 
     while (!WindowShouldClose()) {
         Clay_SetLayoutDimensions((Clay_Dimensions){GetScreenWidth(), GetScreenHeight()});
@@ -375,7 +401,7 @@ main(void) {
                 memset(inputbuf, 0, 256);
             }
             
-            if (IsKeyPressed(KEY_ENTER)) {
+            if (IsKeyPressed(KEY_ENTER) && strlen(inputbuf)) {
                 input_mode = false;
                 if (make_dir) {
                     makedir(inputbuf);
@@ -384,7 +410,10 @@ main(void) {
             }
         }
         else {
-            if (IsKeyPressed(KEY_A)) {
+            if (IsKeyPressed(KEY_Q)) {
+                break;
+            }
+            else if (IsKeyPressed(KEY_A)) {
                 goback(&dir);
             }
             else if (IsKeyPressed(KEY_W)) {
@@ -393,10 +422,36 @@ main(void) {
             else if (IsKeyPressed(KEY_S)) {
                 togglehide();
             }
+            else if (IsKeyPressed(KEY_R)) {
+                del_mode = true;
+                choosemode = true;
+            }
+            // Advance
+            //else if (IsKeyPressed(KEY_D)) {
+            //    if (strlen(cursel)) {
+            //        advance(&dir, cursel);
+            //        *cursel = 0;
+            //    }
+            //}
             // Create directory
-            else if(IsKeyPressed(KEY_E)) {
+            else if(IsKeyPressed(KEY_F)) {
                 input_mode = true;
                 make_dir = true;
+            }
+
+            if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E))
+                    && del_mode && choosemode && strlen(chosen)) {
+                choosemode = false;
+                del_mode = false;
+                char *filepath = malloc(strlen(curpath) + strlen(chosen) + 1);
+                strcpy(filepath, curpath);
+                strcat(filepath, chosen);
+                if (remove(filepath)) {
+                    perror("remove()");
+                    strncpy(message, strerror(errno), MESSAGE_SIZE);
+                }
+                free(filepath);
+                *chosen = 0;
             }
         }
 
@@ -406,12 +461,12 @@ main(void) {
         CLAY({.id = CLAY_ID("OuterContainer"),
               .layout = {
                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}
+                .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
               },
               .backgroundColor = (Clay_Color)CLR_BG}){
 
             CLAY({.id = CLAY_ID("TopBar"), .layout = {
-                    .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(24)},
+                    .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(FONT_SIZE)},
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                  }, .backgroundColor = (Clay_Color)CLR_BG_TOPBAR}) {
 
@@ -423,7 +478,7 @@ main(void) {
                             .padding = {8, 8, 0, 0}
                          }, .backgroundColor = CLR_HOVER(CLR_BG_TOPBAR_HOVER, CLR_BG_TOPBAR)}) {
                         Clay_OnHover(backhandle, (intptr_t)&dir);
-                        CLAY_TEXT(CLAY_STRING("<"), CLAY_TEXT_CONFIG({.fontSize = 24,
+                        CLAY_TEXT(CLAY_STRING("<"), CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE,
                                     .textColor = CLR_HOVER(CLR_TXT_TOPBAR_HOVER, CLR_TXT_TOPBAR)}));
                     }
 
@@ -432,7 +487,7 @@ main(void) {
                             .padding = {8, 8, 0, 0}
                          }, .backgroundColor = CLR_HOVER(CLR_BG_TOPBAR_HOVER, CLR_BG_TOPBAR)}) {
                         Clay_OnHover(homehandle, (intptr_t)&dir);
-                        CLAY_TEXT(CLAY_STRING("~"), CLAY_TEXT_CONFIG({.fontSize = 24,
+                        CLAY_TEXT(CLAY_STRING("~"), CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE,
                                     .textColor = CLR_HOVER(CLR_TXT_TOPBAR_HOVER, CLR_TXT_TOPBAR)}));
                     }
 
@@ -441,7 +496,7 @@ main(void) {
                             .padding = {8, 8, 0, 0}
                          }, .backgroundColor = CLR_HOVER(CLR_BG_TOPBAR_HOVER, CLR_BG_TOPBAR)}) {
                         Clay_OnHover(hidehandle, (intptr_t)&dir);
-                        CLAY_TEXT(CLAY_STRING("."), CLAY_TEXT_CONFIG({.fontSize = 24,
+                        CLAY_TEXT(CLAY_STRING("."), CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE,
                                     .textColor = CLR_HOVER(CLR_TXT_TOPBAR_HOVER, CLR_TXT_TOPBAR)}));
                     }
                     CLAY({.layout = {
@@ -449,36 +504,62 @@ main(void) {
                             .padding = {8, 8, 0, 0}
                          }, .backgroundColor = CLR_BG_TOPBAR}) {
                         CLAY_TEXT(((Clay_String){.length = strlen(numfiles_str), .chars = numfiles_str}),
-                                CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT_TOPBAR}));
+                                CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_TOPBAR}));
                     }
                 }
 
-                CLAY_TEXT(((Clay_String){.length = strlen(curpath), .chars = curpath}), CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT_TOPBAR}));
+                CLAY_TEXT(((Clay_String){.length = strlen(curpath), .chars = curpath}), CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_TOPBAR}));
             }
 
 
             fileentries(&dir);
-            
-            if (input_mode)
-            CLAY({//.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
+
+            if (strlen(chosen) && del_mode)
+            CLAY({.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
                   .floating = {.attachPoints = {.parent = CLAY_ATTACH_POINT_CENTER_CENTER,
                                .element = CLAY_ATTACH_POINT_CENTER_CENTER},
                                .attachTo = CLAY_ATTACH_TO_PARENT
                               },
+                  .backgroundColor = CLR_BG,
                   .layout = {
                     .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
-                    .padding = {16, 16, 0, 0}
+                    .padding = {16,32,16,16},
                  }}) {
-                 CLAY_TEXT(((Clay_String){.chars = inputbuf, .length = strlen(inputbuf)}),
-                         CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT}));
+
+                 CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                    CLAY_TEXT(CLAY_STRING("Are you sure you want to remove this file/dir?"),
+                            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
+                    CLAY_TEXT(((Clay_String){.chars = chosen, .length = strlen(chosen)}),
+                            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_TODEL}));
+                 }
+            }
+            
+            if (input_mode)
+            CLAY({.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
+                  .floating = {.attachPoints = {.parent = CLAY_ATTACH_POINT_CENTER_CENTER,
+                               .element = CLAY_ATTACH_POINT_CENTER_CENTER},
+                               .attachTo = CLAY_ATTACH_TO_PARENT
+                              },
+                  .backgroundColor = CLR_BG,
+                  .layout = {
+                    .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
+                    .padding = {16, 32, 16, 16}
+                 }}) {
+                
+                 CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                    CLAY_TEXT(CLAY_STRING("Create a directory?"),
+                            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
+                    CLAY_TEXT(((Clay_String){.chars = inputbuf, .length = strlen(inputbuf)}),
+                            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_MAKEDIR}));
+                 }
             }
 
 #ifdef BOTTOM_BAR
             CLAY({.id = CLAY_ID("BottomBar"), .layout = {
-                    .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(24)},
+                    .sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(FONT_SIZE)},
                     .layoutDirection = CLAY_LEFT_TO_RIGHT
                  }, .backgroundColor = (Clay_Color)CLR_BG, .border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT}}) {
-                CLAY_TEXT(((Clay_String){.length = strlen(message), .chars = message}), CLAY_TEXT_CONFIG({.fontSize = 24, .textColor = CLR_TXT}));
+                CLAY_TEXT(((Clay_String){.length = strlen(message), .chars = message}), CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
             }
 #endif
         };
@@ -507,7 +588,7 @@ main(void) {
                 char *str = slice2str(comm->renderData.text.stringContents);
                 const int16_t fontsz = comm->renderData.text.fontSize;
                 const Color clr = COLOR_CL2R(comm->renderData.text.textColor);
-                DrawTextEx(font, str, (Vector2){comm->boundingBox.x, comm->boundingBox.y}, fontsz, 2, clr);
+                DrawTextEx(font, str, (Vector2){comm->boundingBox.x, comm->boundingBox.y}, fontsz, TEXT_SPACING, clr);
                 free(str);
                 break;
 
