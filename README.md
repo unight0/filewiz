@@ -39,7 +39,9 @@ to accept name, press escape to cancel.
 
 ### S
 Select key. Hold it, press left mouse button and hover it
-over the files you want to select. 
+over the files you want to select. Selected files will not
+be de-selected even if you leave the directory.
+To de-select them, press escape.
 
 ### R
 Delete key. Press without selecting a file and a popup menu
@@ -58,8 +60,6 @@ press T to copy all of the selected files into the current directory.
 ## Customization
 Customizing controls and color schemes can be done directly
 in the 'main.c' source file. Here's how it looks:
-Note: selected files will not be de-selected even if you leave
-the directory. To de-select them, press escape.
 
 ```C
 #define K_QUIT KEY_Q
@@ -109,4 +109,4 @@ be misrepresented as being the original software.
 distribution.
 ```
 Z-lib license applies only to 'clay.h'. The license of the rest of the
-project is GPL-2 (you can find it in 'LICENSE').
+project is GNU GPL-2 (you can find it in 'LICENSE').
