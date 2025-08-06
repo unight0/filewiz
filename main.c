@@ -14,6 +14,21 @@
 #define CLAY_IMPLEMENTATION
 #include "clay.h"
 
+/* Key configurations */
+#define K_QUIT KEY_Q
+#define K_HOME KEY_W
+#define K_HIDE KEY_H
+#define K_ACCEPT KEY_E
+#define K_ACCEPT_SERIOUS KEY_ENTER
+#define K_CANCEL KEY_ESCAPE
+#define K_BACK KEY_A
+#define K_MAKEDIR KEY_F
+#define K_SELECT KEY_S
+#define K_DEL KEY_R
+#define K_MOVE KEY_G
+#define K_COPY KEY_T
+
+/* Colorscheme and other UI configuration */
 #define BOTTOM_BAR
 #define INIT_SCRW 900
 #define INIT_SCRH 600
@@ -472,7 +487,6 @@ copys(const char *fromdir, const char *todir) {
 
 void
 copydir(const char *path, const char *to) {
-    printf("COPYDIR: '%s'\n", path);
     char *namep = namepart(path);
 
     char *newpath = malloc(strlen(to) + strlen(namep) + 2);
@@ -495,7 +509,6 @@ copydir(const char *path, const char *to) {
 
 void
 copyfile(const char *path, const char *todir) {
-    printf("COPYFILE: '%s'\n", path);
     char *namep = namepart(path);
     char *newpath = malloc(strlen(todir) + strlen(namep) + 2);
 
@@ -534,8 +547,6 @@ void
 copy(const char *path, const char *to) {
     struct stat buf;
     
-    printf("COPY: '%s'\n", path);
-
     if (stat(path, &buf)) {
         explain("stat()");
         return;
@@ -577,7 +588,11 @@ main(void) {
     Clay_Initialize(arena, (Clay_Dimensions){INIT_SCRW, INIT_SCRH}, (Clay_ErrorHandler){errorhandle});
     Clay_SetMeasureTextFunction(measuretext, &font);
 
-    strcpy(curpath, "/home/w/Programming/");
+    struct passwd *pw = getpwuid(getuid());
+
+    strncpy(curpath, pw->pw_dir, CURPATH_SIZE);
+    strncat(curpath, "/", CURPATH_SIZE);
+
     strcpy(message, "Welcome!");
 
     DIR *dir = opendir(curpath);
@@ -615,12 +630,12 @@ main(void) {
                     inputbuf[strlen(inputbuf)-1] = 0;
             }
 
-            if (IsKeyPressed(KEY_ESCAPE)) {
+            if (IsKeyPressed(K_CANCEL)) {
                 input_mode = false;
                 memset(inputbuf, 0, 256);
             }
             
-            if (IsKeyPressed(KEY_ENTER) && strlen(inputbuf)) {
+            if (IsKeyPressed(K_ACCEPT_SERIOUS) && strlen(inputbuf)) {
                 input_mode = false;
                 if (make_dir) {
                     makedir(inputbuf);
@@ -629,13 +644,13 @@ main(void) {
             }
         }
         else if (del_mode) {
-            if (IsKeyPressed(KEY_ESCAPE)) {
+            if (IsKeyPressed(K_CANCEL)) {
                 del_mode = false;
                 choosemode = false;
                 *chosen = 0;
             }
 
-            if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E))
+            if ((IsKeyPressed(K_ACCEPT_SERIOUS) || IsKeyPressed(K_ACCEPT))
                     && choosemode && strlen(chosen)) {
                 choosemode = false;
                 del_mode = false;
@@ -648,31 +663,31 @@ main(void) {
             }
         }
         else if (del_select_mode) {
-            if (IsKeyPressed(KEY_ENTER)) {
+            if (IsKeyPressed(K_ACCEPT_SERIOUS)) {
                 del_select_mode = false;
                 delselect();
                 freeselect();
             }
-            else if (IsKeyPressed(KEY_ESCAPE)) {
+            else if (IsKeyPressed(K_CANCEL)) {
                 del_select_mode = false;
             }
         }
         else {
-            if (IsKeyPressed(KEY_Q)) {
+            if (IsKeyPressed(K_QUIT)) {
                 break;
             }
-            else if (IsKeyPressed(KEY_A)) {
+            else if (IsKeyPressed(K_BACK)) {
                 goback(&dir);
             }
             // Go to '~'
-            else if (IsKeyPressed(KEY_W)) {
+            else if (IsKeyPressed(K_HOME)) {
                 gohome(&dir);
             }
-            else if (IsKeyPressed(KEY_H)) {
+            else if (IsKeyPressed(K_HIDE)) {
                 togglehide();
             }
             // Delete selected, or delete one file
-            else if (IsKeyPressed(KEY_R)) {
+            else if (IsKeyPressed(K_DEL)) {
                 if (selected_sz) {
                     del_select_mode = true;
                 }
@@ -682,22 +697,22 @@ main(void) {
                 }
             }
             // Paste
-            else if (IsKeyPressed(KEY_T)) {
+            else if (IsKeyPressed(K_COPY)) {
                 paste();
                 freeselect();
             }
             // Move 
-            else if (IsKeyPressed(KEY_G)) {
+            else if (IsKeyPressed(K_MOVE)) {
                 movesel();
                 freeselect();
             }
             // Make directory
-            else if (IsKeyPressed(KEY_F)) {
+            else if (IsKeyPressed(K_MAKEDIR)) {
                 input_mode = true;
                 make_dir = true;
             }
             // Unselect all
-            else if (IsKeyPressed(KEY_ESCAPE)) {
+            else if (IsKeyPressed(K_CANCEL)) {
                 freeselect();
             }
         }
