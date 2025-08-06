@@ -146,6 +146,12 @@ measuretext(Clay_StringSlice text, Clay_TextElementConfig *config, void *userDat
 }
 
 void
+explain(const char *what) {
+    perror(what);
+    strncpy(message, strerror(errno), MESSAGE_SIZE);
+}
+
+void
 opencurdir(DIR **dirp) {
     *dirp = opendir(curpath);
     if (*dirp == NULL) {
@@ -177,8 +183,7 @@ advance(DIR **dirp, const char *dest) {
     //printf("Advancing to '%s'\n", pathcpy);
     DIR *new = opendir(pathcpy); 
     if (new == NULL) {
-        perror("opendir()");
-        strncpy(message, strerror(errno), MESSAGE_SIZE-1);
+        explain("opendir()");
         free(pathcpy);
         return;
     }
@@ -372,10 +377,7 @@ makedir(const char *name) {
     strcpy(path, curpath);
     strcat(path, name);
 
-    if (mkdir(path, 0755)) {
-        perror("mkdir()");
-        strncpy(message, strerror(errno), MESSAGE_SIZE);
-    }
+    if (mkdir(path, 0755)) explain("mkdir()");
 
     free(path);
 }
@@ -384,8 +386,9 @@ void
 delselect(void) {
     for (size_t i = 0; i < selected_sz; i++) {
         if (remove(selected[i])) {
-            perror("remove()");
-            snprintf(message, MESSAGE_SIZE, "%s: %s", selected[i], strerror(errno));
+            //perror("remove()");
+            //snprintf(message, MESSAGE_SIZE, "%s: %s", selected[i], strerror(errno));
+            explain("remove()");
         }
     }
 }
@@ -412,49 +415,6 @@ namepart(const char *path) {
     return p + 1;
 }
 
-//void
-//copyfile(const char *path) {
-//    char *namep = namepart(path);
-//    char *newpath = malloc(strlen(curpath) + strlen(namep) + 1);
-//
-//    strcpy(newpath, curpath);
-//    strcat(newpath, namep);
-//
-//    // TODO: use fstat() to copy file permissions too
-//
-//    int from = open(path, O_RDONLY);
-//    int to = creat(newpath, 0644);
-//
-//    if (from < 0) {
-//        perror("open()");
-//        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
-//        if (to >= 0) close(to);
-//        return;
-//    }
-//
-//    if (to < 0) {
-//        perror("open()");
-//        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
-//        close(from);
-//        return;
-//    }
-//
-//    const off_t size = lseek(from, 0, SEEK_END);
-//    lseek(from, 0, SEEK_SET);
-//
-//    // Copying done by kernel
-//    sendfile(to, from, NULL, size);
-//}
-//
-//void
-//paste(void) {
-//    if (!selected_sz) return;
-//
-//    for (size_t i = 0; i < selected_sz; i++) {
-//        copyfile(selected[i]);
-//    }
-//}
-
 void
 move(const char *path) {
     char *namep = namepart(path);
@@ -475,6 +435,127 @@ movesel(void) {
         move(selected[i]);
     }
 }
+
+void copy(const char*, const char*);
+
+void
+copys(const char *fromdir, const char *todir) {
+    DIR *dir = opendir(fromdir);
+    if (dir == NULL) {
+        explain("opendir()");
+        return;
+    }
+
+    errno = 0;
+    struct dirent *dire = readdir(dir);
+
+    char *filepath = malloc(strlen(fromdir) + 2);
+    strcpy(stpcpy(filepath, fromdir), "/");
+
+    while (dire != NULL) {
+        if (!strcmp(dire->d_name, ".") || !(strcmp(dire->d_name, ".."))) {
+            dire = readdir(dir);
+            continue;
+        }
+
+        filepath = realloc(filepath, strlen(dire->d_name) + strlen(fromdir) + 2);
+        strcpy(filepath + strlen(fromdir) + 1, dire->d_name);
+        copy(filepath, todir);
+        dire = readdir(dir);
+    }
+
+    if (errno) explain("readdir()");
+
+    free(filepath);
+    closedir(dir);
+}
+
+void
+copydir(const char *path, const char *to) {
+    printf("COPYDIR: '%s'\n", path);
+    char *namep = namepart(path);
+
+    char *newpath = malloc(strlen(to) + strlen(namep) + 2);
+    strcpy(newpath, to);
+    strcat(newpath, namep);
+
+    if(mkdir(newpath, 0755)) {
+        explain("mkdir()");
+        free(newpath);
+        return;
+    }
+
+    // TODO: check that there is no '/' in namepart
+    strcpy(newpath + strlen(to) + strlen(namep), "/");
+
+    copys(path, newpath);
+
+    free(newpath);
+}
+
+void
+copyfile(const char *path, const char *todir) {
+    printf("COPYFILE: '%s'\n", path);
+    char *namep = namepart(path);
+    char *newpath = malloc(strlen(todir) + strlen(namep) + 2);
+
+    strcpy(newpath, todir);
+    strcat(newpath, "/");
+    strcat(newpath, namep);
+
+    // TODO: use fstat() to copy file permissions too
+
+    int from = open(path, O_RDONLY);
+    int to = creat(newpath, 0644);
+
+    if (from < 0) {
+        perror("open()");
+        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
+        if (to >= 0) close(to);
+        return;
+    }
+
+    if (to < 0) {
+        perror("open()");
+        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
+        close(from);
+        return;
+    }
+
+    const off_t size = lseek(from, 0, SEEK_END);
+    lseek(from, 0, SEEK_SET);
+
+    // Copying done by kernel
+    sendfile(to, from, NULL, size);
+}
+
+
+void
+copy(const char *path, const char *to) {
+    struct stat buf;
+    
+    printf("COPY: '%s'\n", path);
+
+    if (stat(path, &buf)) {
+        explain("stat()");
+        return;
+    }
+    
+    if (buf.st_mode & S_IFDIR)
+        copydir(path, to);
+    else
+        copyfile(path, to);
+}
+
+void
+paste(void) {
+    if (!selected_sz) return;
+
+    for (size_t i = 0; i < selected_sz; i++) {
+        copy(selected[i], curpath);
+    }
+}
+
 
 int
 main(void) {
@@ -547,6 +628,25 @@ main(void) {
                 memset(inputbuf, 0, 256);
             }
         }
+        else if (del_mode) {
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                del_mode = false;
+                choosemode = false;
+                *chosen = 0;
+            }
+
+            if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E))
+                    && choosemode && strlen(chosen)) {
+                choosemode = false;
+                del_mode = false;
+                char *filepath = malloc(strlen(curpath) + strlen(chosen) + 1);
+                strcpy(filepath, curpath);
+                strcat(filepath, chosen);
+                if (remove(filepath)) explain("remove()");
+                free(filepath);
+                *chosen = 0;
+            }
+        }
         else if (del_select_mode) {
             if (IsKeyPressed(KEY_ENTER)) {
                 del_select_mode = false;
@@ -582,10 +682,10 @@ main(void) {
                 }
             }
             // Paste
-            //else if (IsKeyPressed(KEY_T)) {
-            //    pastesel();
-            //    freeselect();
-            //}
+            else if (IsKeyPressed(KEY_T)) {
+                paste();
+                freeselect();
+            }
             // Move 
             else if (IsKeyPressed(KEY_G)) {
                 movesel();
@@ -599,21 +699,6 @@ main(void) {
             // Unselect all
             else if (IsKeyPressed(KEY_ESCAPE)) {
                 freeselect();
-            }
-
-            if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E))
-                    && del_mode && choosemode && strlen(chosen)) {
-                choosemode = false;
-                del_mode = false;
-                char *filepath = malloc(strlen(curpath) + strlen(chosen) + 1);
-                strcpy(filepath, curpath);
-                strcat(filepath, chosen);
-                if (remove(filepath)) {
-                    perror("remove()");
-                    strncpy(message, strerror(errno), MESSAGE_SIZE);
-                }
-                free(filepath);
-                *chosen = 0;
             }
         }
 
