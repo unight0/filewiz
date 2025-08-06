@@ -2,6 +2,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
 #include <errno.h>
 
 // Getting home directory
@@ -93,6 +95,7 @@ doselect(const char *name) {
 
 void
 freeselect(void) {
+    if (selected == NULL) return;
     for(--selected_sz; selected_sz; selected_sz--) {
         free(selected[selected_sz]);
     }
@@ -387,6 +390,92 @@ delselect(void) {
     }
 }
 
+void
+listselect(void) {
+    for (size_t i = 0; i < selected_sz; i++) {
+        CLAY_TEXT(((Clay_String){.chars = selected[i], .length = strlen(selected[i])}),
+                CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
+    }
+}
+
+char *
+namepart(const char *path) {
+    size_t len = strlen(path);
+    if (len <= 1) return (char*)path;
+
+    char *p = (char*)path + len;
+
+    if (*p == '/') p--;
+
+    for (; *p != '/'; p--);
+
+    return p + 1;
+}
+
+//void
+//copyfile(const char *path) {
+//    char *namep = namepart(path);
+//    char *newpath = malloc(strlen(curpath) + strlen(namep) + 1);
+//
+//    strcpy(newpath, curpath);
+//    strcat(newpath, namep);
+//
+//    // TODO: use fstat() to copy file permissions too
+//
+//    int from = open(path, O_RDONLY);
+//    int to = creat(newpath, 0644);
+//
+//    if (from < 0) {
+//        perror("open()");
+//        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
+//        if (to >= 0) close(to);
+//        return;
+//    }
+//
+//    if (to < 0) {
+//        perror("open()");
+//        snprintf(message, MESSAGE_SIZE, "%s: %s", path, strerror(errno));
+//        close(from);
+//        return;
+//    }
+//
+//    const off_t size = lseek(from, 0, SEEK_END);
+//    lseek(from, 0, SEEK_SET);
+//
+//    // Copying done by kernel
+//    sendfile(to, from, NULL, size);
+//}
+//
+//void
+//paste(void) {
+//    if (!selected_sz) return;
+//
+//    for (size_t i = 0; i < selected_sz; i++) {
+//        copyfile(selected[i]);
+//    }
+//}
+
+void
+move(const char *path) {
+    char *namep = namepart(path);
+    char *newpath = malloc(strlen(curpath) + strlen(namep) + 1);
+    strcpy(newpath, curpath);
+    strcat(newpath, namep);
+
+    rename(path, newpath);
+    
+    free(newpath);
+}
+
+void
+movesel(void) {
+    if (!selected_sz) return;
+
+    for (size_t i = 0; i < selected_sz; i++) {
+        move(selected[i]);
+    }
+}
+
 int
 main(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
@@ -420,6 +509,7 @@ main(void) {
     bool make_dir = false;
     bool input_mode = false;
     bool del_mode = false;
+    bool del_select_mode = false;
 
     while (!WindowShouldClose()) {
         Clay_SetLayoutDimensions((Clay_Dimensions){GetScreenWidth(), GetScreenHeight()});
@@ -457,6 +547,16 @@ main(void) {
                 memset(inputbuf, 0, 256);
             }
         }
+        else if (del_select_mode) {
+            if (IsKeyPressed(KEY_ENTER)) {
+                del_select_mode = false;
+                delselect();
+                freeselect();
+            }
+            else if (IsKeyPressed(KEY_ESCAPE)) {
+                del_select_mode = false;
+            }
+        }
         else {
             if (IsKeyPressed(KEY_Q)) {
                 break;
@@ -464,33 +564,39 @@ main(void) {
             else if (IsKeyPressed(KEY_A)) {
                 goback(&dir);
             }
+            // Go to '~'
             else if (IsKeyPressed(KEY_W)) {
                 gohome(&dir);
             }
             else if (IsKeyPressed(KEY_H)) {
                 togglehide();
             }
+            // Delete selected, or delete one file
             else if (IsKeyPressed(KEY_R)) {
                 if (selected_sz) {
-                    delselect();
+                    del_select_mode = true;
                 }
                 else {
                     del_mode = true;
                     choosemode = true;
                 }
             }
-            // Advance
-            //else if (IsKeyPressed(KEY_D)) {
-            //    if (strlen(cursel)) {
-            //        advance(&dir, cursel);
-            //        *cursel = 0;
-            //    }
+            // Paste
+            //else if (IsKeyPressed(KEY_T)) {
+            //    pastesel();
+            //    freeselect();
             //}
-            // Create directory
+            // Move 
+            else if (IsKeyPressed(KEY_G)) {
+                movesel();
+                freeselect();
+            }
+            // Make directory
             else if (IsKeyPressed(KEY_F)) {
                 input_mode = true;
                 make_dir = true;
             }
+            // Unselect all
             else if (IsKeyPressed(KEY_ESCAPE)) {
                 freeselect();
             }
@@ -590,6 +696,7 @@ main(void) {
                  }
             }
             
+            //////////////////////////////////////////////////////// Input something (directory name)
             if (input_mode)
             CLAY({.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
                   .floating = {.attachPoints = {.parent = CLAY_ATTACH_POINT_CENTER_CENTER,
@@ -607,6 +714,29 @@ main(void) {
                             CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
                     CLAY_TEXT(((Clay_String){.chars = inputbuf, .length = strlen(inputbuf)}),
                             CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_MAKEDIR}));
+                 }
+            }
+
+            /////////////////////////////////////////////////////////////// Delete selected entries
+            if (del_select_mode)
+            CLAY({.border = {.width = CLAY_BORDER_ALL(1), .color=CLR_TXT},
+                  .floating = {.attachPoints = {.parent = CLAY_ATTACH_POINT_CENTER_CENTER,
+                               .element = CLAY_ATTACH_POINT_CENTER_CENTER},
+                               .attachTo = CLAY_ATTACH_TO_PARENT
+                              },
+                  .backgroundColor = CLR_BG,
+                  .layout = {
+                    .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
+                    .padding = {16, 32, 16, 16}
+                 }}) {
+                
+                 CLAY({.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                    CLAY_TEXT(CLAY_STRING("Delete following?"),
+                            CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT}));
+
+                    listselect();
+                    //CLAY_TEXT(((Clay_String){.chars = inputbuf, .length = strlen(inputbuf)}),
+                    //        CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE, .textColor = CLR_TXT_MAKEDIR}));
                  }
             }
 
