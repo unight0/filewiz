@@ -17,8 +17,9 @@
 #define INIT_SCRH 600
 #define FONT_SIZE 26
 #define TEXT_SPACING 1
-#define CLR_BG /*{69, 46, 46, 255}*/{0, 0, 0, 255}
-#define CLR_TXT {255,255,255,255}//{230, 225, 196, 255}
+#define MOUSE_SCROLL_SENSITIVITY 5
+#define CLR_BG {0, 0, 0, 255}
+#define CLR_TXT {255,255,255,255}
 #define CLR_SELECT {0, 255, 255, 255}
 #define CLR_TXT_LNK {0, 150, 255, 255}
 #define CLR_TXT_BLK {255, 255, 0, 255}
@@ -32,11 +33,8 @@
 #define CLR_TXT_HOVER {0, 0, 0, 255}
 #define CLR_BG_TOPBAR_HOVER {0, 0, 0, 255}
 #define CLR_TXT_TOPBAR_HOVER {255, 255, 255, 255}
-
 #define CLR_TXT_TODEL {255, 0, 50, 255}
 #define CLR_TXT_MAKEDIR CLR_TXT_DIR    
-
-#define MOUSE_SCROLL_SENSITIVITY 5
 
 #define COLOR_CL2R(cc) (Color){.r=cc.r,.g=cc.g,.b=cc.b,.a=cc.a}
 #define CLR_HOVER(c1,c2) (Clay_Hovered() ? (Clay_Color) c1 : (Clay_Color) c2)
@@ -52,32 +50,55 @@
 
 char curpath[CURPATH_SIZE];
 char message[MESSAGE_SIZE];
-char tofree[TOFREE_SIZE][TOFREE_NAMELEN] = {0};
+char estrs[TOFREE_SIZE][TOFREE_NAMELEN] = {0};
 char chosen[CHOSEN_SIZE] = {0};
 bool hidemode = true;
 bool choosemode = false;
 int numfiles = 0;
+// List of selected filepaths
+char **selected = NULL;
+size_t selected_sz = 0;
 
-/*
-void
-tofree(struct tofree tfr) {
-    static size_t freestrs_sz = 0;
-    
-    // Free all
-    if (tfr.str == NULL) {
-        for (int i = 0; i < freestrs_sz; i++)
-            free(freestrs[i].tfr);
-        free(freestrs);
-        freestrs_sz = 0;
-        return;
+bool
+isselect(const char *name) {
+    char *path = malloc(strlen(curpath) + strlen(name) + 1);
+    strcpy(path, curpath);
+    strcat(path, name);
+
+    for (size_t i = 0; i < selected_sz; i++) {
+        if (!strcmp(path, selected[i])) {
+            free(path);
+            return true;
+        }
     }
 
-
-    // Append to list
-    freestrs = realloc(freestrs, (++freestrs_sz)*sizeof(char*));
-    freestrs[freestrs_sz-1] = str;
+    free(path);
+    return false;
 }
-*/
+
+void
+doselect(const char *name) {
+    if (isselect(name)) return;
+
+    char *path = malloc(strlen(curpath) + strlen(name) + 1);
+    strcpy(path, curpath);
+    strcat(path, name);
+
+    snprintf(message, MESSAGE_SIZE, "Selected %d", selected_sz+1);
+
+    selected = realloc(selected, (selected_sz+1)*sizeof(char*));
+
+    selected[selected_sz++] = path;
+}
+
+void
+freeselect(void) {
+    for(--selected_sz; selected_sz; selected_sz--) {
+        free(selected[selected_sz]);
+    }
+    free(selected);
+    selected = NULL;
+}
 
 void
 errorhandle(Clay_ErrorData errdat) {
@@ -167,6 +188,16 @@ advance(DIR **dirp, const char *dest) {
 
 void
 entryhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
+    
+    // Select mode
+    if(IsMouseButtonDown(MOUSE_BUTTON_LEFT) && IsKeyDown(KEY_S)) {
+        char *dest = clstr2str(elementid.stringId);
+        doselect(dest);
+        free(dest);
+        return;
+    }
+
+    // Normal
     if (pointerdat.state != CLAY_POINTER_DATA_PRESSED_THIS_FRAME) return;
 
     DIR **dirp = (DIR**)userdata;
@@ -243,6 +274,25 @@ hidehandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userd
     togglehide();
 }
 
+Clay_Color
+getclr(unsigned char type) {
+    switch (type) {
+        case DT_DIR:
+        return (Clay_Color) CLR_TXT_DIR;
+        case DT_LNK:
+        return (Clay_Color) CLR_TXT_LNK;
+        case DT_BLK:
+        return (Clay_Color) CLR_TXT_BLK;
+        case DT_SOCK:
+        return (Clay_Color) CLR_TXT_SCK;
+        case DT_FIFO:
+        return (Clay_Color) CLR_TXT_PIP;
+        case DT_CHR:
+        return (Clay_Color) CLR_TXT_CHR;
+    }
+    return (Clay_Color) CLR_TXT;
+}
+
 void
 fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
     if (!strcmp(str, ".")) return;
@@ -251,23 +301,11 @@ fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
     if (hidemode && *str == '.') return;
     //printf("FE: '%s'\n", str);
 
-    Clay_Color clr = CLR_TXT;
-    if (type == DT_DIR)
-        clr = (Clay_Color) CLR_TXT_DIR;
-    if (type == DT_LNK)
-        clr = (Clay_Color) CLR_TXT_LNK;
-    if (type == DT_BLK)
-        clr = (Clay_Color) CLR_TXT_BLK;
-    if (type == DT_SOCK)
-        clr = (Clay_Color) CLR_TXT_SCK;
-    if (type == DT_FIFO)
-        clr = (Clay_Color) CLR_TXT_PIP;
-    if (type == DT_CHR) 
-        clr = (Clay_Color) CLR_TXT_CHR;
+    Clay_Color clr = getclr(type);
 
-    strcpy(tofree[ord], str);
+    strcpy(estrs[ord], str);
     
-    CLAY({.id = CLAY_SID(((Clay_String){.length = strlen(str), .chars = tofree[ord]})),
+    CLAY({.id = CLAY_SID(((Clay_String){.length = strlen(str), .chars = estrs[ord]})),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(FONT_SIZE+2, FONT_SIZE+10)},
           //.padding = Clay_Hovered() ? 48 : 16,
           .padding = 16,
@@ -280,9 +318,9 @@ fileentry(DIR **dirp, const char *str, unsigned char type, int ord) {
 
         Clay_OnHover(entryhandle, (intptr_t)dirp);
         CLAY_TEXT(
-            ((Clay_String){.length = strlen(str), .chars = tofree[ord]}),
+            ((Clay_String){.length = strlen(str), .chars = estrs[ord]}),
             CLAY_TEXT_CONFIG({.fontSize = FONT_SIZE,
-                .textColor = (Clay_Hovered()/*||!strcmp(cursel, tofree[ord])*/) ? (Clay_Color)CLR_SELECT: clr
+                .textColor = (Clay_Hovered()||isselect(str)) ? (Clay_Color)CLR_SELECT: clr
                 //.textColor = clr
             })
         );
@@ -337,6 +375,16 @@ makedir(const char *name) {
     }
 
     free(path);
+}
+
+void
+delselect(void) {
+    for (size_t i = 0; i < selected_sz; i++) {
+        if (remove(selected[i])) {
+            perror("remove()");
+            snprintf(message, MESSAGE_SIZE, "%s: %s", selected[i], strerror(errno));
+        }
+    }
 }
 
 int
@@ -419,12 +467,17 @@ main(void) {
             else if (IsKeyPressed(KEY_W)) {
                 gohome(&dir);
             }
-            else if (IsKeyPressed(KEY_S)) {
+            else if (IsKeyPressed(KEY_H)) {
                 togglehide();
             }
             else if (IsKeyPressed(KEY_R)) {
-                del_mode = true;
-                choosemode = true;
+                if (selected_sz) {
+                    delselect();
+                }
+                else {
+                    del_mode = true;
+                    choosemode = true;
+                }
             }
             // Advance
             //else if (IsKeyPressed(KEY_D)) {
@@ -434,9 +487,12 @@ main(void) {
             //    }
             //}
             // Create directory
-            else if(IsKeyPressed(KEY_F)) {
+            else if (IsKeyPressed(KEY_F)) {
                 input_mode = true;
                 make_dir = true;
+            }
+            else if (IsKeyPressed(KEY_ESCAPE)) {
+                freeselect();
             }
 
             if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_E))
@@ -607,4 +663,9 @@ main(void) {
         }
         EndDrawing();
     }
+
+    CloseWindow();
+    freeselect();
+
+    return 0;
 }
