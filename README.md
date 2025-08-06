@@ -93,7 +93,7 @@ link to run it from somewhere else (like /usr/bin/). This will be
 fixed in future.
 
 ## About Clay
-Thanks for @nicbarker for writing this library! It is easy to use
+Thanks to @nicbarker for writing this library! It is easy to use
 and fits my needs perfectly. The following text is the Z-lib license
 used by Clay:
 ```
