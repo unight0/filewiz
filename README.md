@@ -33,6 +33,11 @@ Default key for cancelling creating files, cancelling selection, etc.
 ### A
 View the parent directory of current directory.
 
+### D
+If you just pressed A to go to the parent directory, pressing D will
+return you to the previously viewed child directory. (This is called
+REDO)
+
 ### F
 Create a new directory. A prompt will be shown. Press enter
 to accept name, press escape to cancel.

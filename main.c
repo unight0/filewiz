@@ -22,6 +22,7 @@
 #define K_ACCEPT_SERIOUS KEY_ENTER
 #define K_CANCEL KEY_ESCAPE
 #define K_BACK KEY_A
+#define K_REDO KEY_D
 #define K_MAKEDIR KEY_F
 #define K_SELECT KEY_S
 #define K_DEL KEY_R
@@ -66,6 +67,7 @@
 #define CHOSEN_SIZE 256
 
 char curpath[CURPATH_SIZE];
+char prevpath[CURPATH_SIZE];
 char message[MESSAGE_SIZE];
 char estrs[TOFREE_SIZE][TOFREE_NAMELEN] = {0};
 char chosen[CHOSEN_SIZE] = {0};
@@ -206,6 +208,7 @@ advance(DIR **dirp, const char *dest) {
     closecurdir(dirp);
     *dirp = new;
     strcpy(curpath, pathcpy);
+    strcpy(prevpath, pathcpy);
     free(pathcpy);
 }
 
@@ -239,6 +242,8 @@ goback(DIR **dirp) {
 
     closecurdir(dirp);
 
+    strncpy(prevpath, curpath, CURPATH_SIZE);
+
     char *p = curpath + strlen(curpath) - 1;
     if (*p == '/') *p = 0;
 
@@ -247,8 +252,22 @@ goback(DIR **dirp) {
 
     opencurdir(dirp);
 
-    strncpy(message, "Navigated BACK", MESSAGE_SIZE-1);
- }
+    strncpy(message, "Navigated BACK", MESSAGE_SIZE);
+}
+
+void
+redo(DIR **dirp) {
+    if (!strcmp(curpath, prevpath)) return;
+
+    closecurdir(dirp);
+
+    strcpy(curpath, prevpath);
+
+    opencurdir(dirp);
+
+    strncpy(message, "REDO", MESSAGE_SIZE);
+}
+
 
 void
 backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata) {
@@ -591,7 +610,7 @@ main(void) {
     struct passwd *pw = getpwuid(getuid());
 
     strncpy(curpath, pw->pw_dir, CURPATH_SIZE);
-    strncat(curpath, "/", CURPATH_SIZE);
+    strncat(curpath, "/", CURPATH_SIZE-1);
 
     strcpy(message, "Welcome!");
 
@@ -678,6 +697,9 @@ main(void) {
             }
             else if (IsKeyPressed(K_BACK)) {
                 goback(&dir);
+            }
+            else if (IsKeyPressed(K_REDO)) {
+                redo(&dir);
             }
             // Go to '~'
             else if (IsKeyPressed(K_HOME)) {
