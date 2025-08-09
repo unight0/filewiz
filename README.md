@@ -1,4 +1,5 @@
 # FileWiz
+![screenshot](./screenshot1.png)
 
 FileWiz (File Wizard) is a file manager that uses mouse and
 keyboard in a hybrid manner to make manipulating files
