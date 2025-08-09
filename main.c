@@ -586,6 +586,59 @@ paste(void) {
     }
 }
 
+//char *
+//lookupfont(const char *fontname) {
+//}
+
+#include <fontconfig/fontconfig.h>
+
+char *
+findfont(FcConfig *conf, const char *fontname) {
+    FcPattern *pat = FcNameParse((const FcChar8*)fontname);
+    FcConfigSubstitute(conf, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+
+    FcResult res;
+    FcPattern *font = FcFontMatch(conf, pat, &res);
+
+    if (font == NULL) {
+        FcPatternDestroy(pat);
+        return NULL;
+    }
+
+    FcChar8* file = NULL;
+    if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch) {
+        printf("Found font file: %s\n", file);
+        char *filepath = malloc(strlen(file) + 1);
+        strcpy(filepath, file);
+        return filepath;
+    }
+
+    FcPatternDestroy(pat);
+}
+
+char *
+fontmisadventures(void) {
+    FcConfig *conf = FcInitLoadConfigAndFonts();
+
+    char *fontpath = findfont(conf, "CascadiaCode");
+    if (fontpath == NULL) {
+        printf("Cascadia Code not found\n");
+        fontpath = findfont(conf, "FiraCode");
+    }
+
+    if (fontpath == NULL) {
+        printf("Fira Code not found\n");
+        fontpath = findfont(conf, "monospace");
+    }
+
+    if (fontpath == NULL) {
+        printf("No valid fontpath found!\n");
+        exit(1);
+    }
+
+    return fontpath;
+}
 
 int
 main(void) {
@@ -594,13 +647,15 @@ main(void) {
     SetTargetFPS(60);
     SetExitKey(0);
 
+    char *fontpath = fontmisadventures();
     // I'm not sure if 4800 is a correct number, but cyrillic
     // doesn't work with smaller numbers. I guess this is the amount 
     // of glyphs to load, and default (0) doesn't load
     // cyrillics.
-    Font font = LoadFontEx("CascadiaCode.ttf", FONT_SIZE, NULL, 4800);
+    Font font = LoadFontEx(fontpath, FONT_SIZE, NULL, 4800);
     //SetTextureFilter(font.texture, /*TEXTURE_FILTER_BILINEAR*/TEXTURE_FILTER_POINT);
     //SetTextLineSpacing(16);
+    free(fontpath);
 
     const size_t memory = Clay_MinMemorySize();
     Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(memory, malloc(memory));
