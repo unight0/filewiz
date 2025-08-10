@@ -643,7 +643,7 @@ fontmisadventures(void) {
 int
 main(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(INIT_SCRW, INIT_SCRH, "App Window");
+    InitWindow(INIT_SCRW, INIT_SCRH, "Filewiz");
     SetTargetFPS(60);
     SetExitKey(0);
 
@@ -666,6 +666,7 @@ main(void) {
 
     strncpy(curpath, pw->pw_dir, CURPATH_SIZE);
     strncat(curpath, "/", CURPATH_SIZE-1);
+    strcpy(prevpath, curpath);
 
     strcpy(message, "Welcome!");
 
