@@ -5,8 +5,7 @@
 #include <sys/sendfile.h>
 #include <fcntl.h>
 #include <errno.h>
-
-// Getting home directory
+#include <magic.h>
 #include <unistd.h>
 #include <pwd.h>
 
@@ -29,12 +28,15 @@
 #define K_MOVE KEY_G
 #define K_COPY KEY_T
 
+/* Default programs to open certain file types */
+#define EDITOR_PROGRAM "emacs"
+#define IMAGE_VIEWER_PROGRAM "feh"
+#define PDF_VIEWER_PROGRAM "zathura"
+
 /* Colorscheme and other UI configuration */
 #define FONT_OPTION_1 "CascadiaCode"
 #define FONT_OPTION_2 "FiraCode"
 #define FONT_OPTION_3 "monospace"
-#define FILE_OPEN_PROGRAM "/usr/bin/xdg-open"
-#define EDITOR_PROGRAM "/usr/bin/emacs"
 #define BOTTOM_BAR
 #define INIT_SCRW 900
 #define INIT_SCRH 600
@@ -147,18 +149,6 @@ clstr2str(Clay_String clstr) {
 
 static inline Clay_Dimensions
 measuretext(Clay_StringSlice text, Clay_TextElementConfig *config, void *userData) {
-    //FIXME: both of these methods return slightly incorrect results.
-    //The first one, for some reason, returns more length than there is,
-    //and the second one accumulates insufficience of length
-
-
-    //// Note: only monospace fonts
-    //Clay_Dimensions fuckyourmomcanyouprovideproperfuckinggoddamndocsqqq = (Clay_Dimensions) {
-    //        .width = text.length * config->fontSize,
-    //        .height = config->fontSize
-    //};
-    //return fuckyourmomcanyouprovideproperfuckinggoddamndocsqqq;
-    
     const Font *font = (Font*)userData;
     char *str = slice2str(text);
     const Vector2 measure = MeasureTextEx(*font, slice2str(text), config->fontSize, TEXT_SPACING);
@@ -218,32 +208,57 @@ isexec(const char *path) {
     return !access(path, X_OK);
 }
 
-void
-execfile(const char *path) {
-    pid_t pid = fork();
-
-    // Parent
-    if (pid) return;
-
-    // Child
-    if (execlp(path, path, NULL)) {
-        perror("execl()");
-        exit(1);
-    }
+int
+is_textual_mime(const char *mime) {
+    return !strncmp(mime, "text", 4);
 }
 
-void
-editfile(const char *path) {
-    pid_t pid = fork();
+int
+is_image_mime(const char *mime) {
+    return !strncmp(mime, "image", 5);
+}
 
-    // Parent
-    if (pid) return;
+const char *
+handler_program(const char *path) {
+    magic_t magic = magic_open(MAGIC_MIME_TYPE);
 
-    // Child
-    if (execlp(EDITOR_PROGRAM, EDITOR_PROGRAM, path, NULL)) {
-        perror("execl()");
-        exit(1);
+    if (magic == NULL) {
+        perror("magic_open()");
+        return NULL;
     }
+
+    // Load magic database
+    if (magic_load(magic, NULL)) {
+        magic_close(magic);
+        return NULL;
+    }
+
+    const char *type = magic_file(magic, path);
+
+    const char *prog = NULL;
+
+    // Textual types: text/*
+    if (is_textual_mime(type))
+        prog = EDITOR_PROGRAM;
+
+    // Executables which are not textual files (so only binaries)
+    else if (isexec(path))
+        prog = path;
+    
+    // Images
+    else if (is_image_mime(type))
+        prog = IMAGE_VIEWER_PROGRAM;
+
+    // PDFs
+    else if (!strcmp(type, "application/pdf"))
+        prog = PDF_VIEWER_PROGRAM;
+
+    else
+        printf("Uknown mime type %s\n", type);
+
+    magic_close(magic);
+    
+    return prog;
 }
 
 void
@@ -255,10 +270,28 @@ advance(DIR **dirp, const char *dest) {
 
     // Text files and executables
     if (!isdir(pathcpy)) {
-        if (isexec(pathcpy))
-            execfile(pathcpy);
-        else
-            editfile(pathcpy);
+        const char *prog = handler_program(pathcpy);
+
+        if (prog == NULL) {
+            strncpy(message, "Error while identifying handler program for file", MESSAGE_SIZE);
+        }
+
+        else {
+            pid_t pid = fork();
+
+            // Parent
+            if (pid) return;
+
+            // Child
+            // This is a bit funny-looking trick
+            // Prevents the an argument being supplied if the
+            // file itself is being executed
+            if (execlp(prog, prog,
+                       (prog == pathcpy) ? NULL : pathcpy, NULL)) {
+                perror("execl()");
+                exit(1);
+            }            
+        }
         free(pathcpy);
         return;
     }

@@ -1,3 +1,3 @@
 #!/bin/sh
 
-gcc main.c -lraylib -lfontconfig -o filewiz
+gcc main.c -lraylib -lfontconfig -lmagic -o filewiz
