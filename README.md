@@ -93,10 +93,7 @@ intuitive.
 ## Building && usage
 You should have raylib install as a system library. Clay is distributed
 alongside this project. Run './build.sh'. Ta-da! The project is built.
-Run filewiz. Notice that, for now, the font used by FileWiz must
-be located in the same folder as it is run in. You can use a logical
-link to run it from somewhere else (like /usr/bin/). This will be
-fixed in future.
+Run filewiz.
 
 ## About Clay
 Thanks to @nicbarker for writing this library! It is easy to use

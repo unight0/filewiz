@@ -30,6 +30,11 @@
 #define K_COPY KEY_T
 
 /* Colorscheme and other UI configuration */
+#define FONT_OPTION_1 "CascadiaCode"
+#define FONT_OPTION_2 "FiraCode"
+#define FONT_OPTION_3 "monospace"
+#define FILE_OPEN_PROGRAM "/usr/bin/xdg-open"
+#define EDITOR_PROGRAM "/usr/bin/emacs"
 #define BOTTOM_BAR
 #define INIT_SCRW 900
 #define INIT_SCRH 600
@@ -188,6 +193,58 @@ closecurdir(DIR **dirp) {
 void
 backhandle(Clay_ElementId elementid, Clay_PointerData pointerdat, intptr_t userdata);
 
+int
+isdir(const char *path) {
+    struct stat st;
+    if (stat(path, &st)) {
+        perror("stat()");
+        return 0;
+    }
+    return S_ISDIR(st.st_mode);
+}
+
+int
+isexec(const char *path) {
+    struct stat st;
+    
+    if (stat(path, &st)) {
+        perror("stat()");
+        return 0;
+    }
+
+    if (!S_ISREG(st.st_mode))
+        return 0;
+    
+    return !access(path, X_OK);
+}
+
+void
+execfile(const char *path) {
+    pid_t pid = fork();
+
+    // Parent
+    if (pid) return;
+
+    // Child
+    if (execlp(path, path, NULL)) {
+        perror("execl()");
+        exit(1);
+    }
+}
+
+void
+editfile(const char *path) {
+    pid_t pid = fork();
+
+    // Parent
+    if (pid) return;
+
+    // Child
+    if (execlp(EDITOR_PROGRAM, EDITOR_PROGRAM, path, NULL)) {
+        perror("execl()");
+        exit(1);
+    }
+}
 
 void
 advance(DIR **dirp, const char *dest) {
@@ -195,8 +252,19 @@ advance(DIR **dirp, const char *dest) {
     strncpy(pathcpy, curpath, CURPATH_SIZE-1);
 
     strncat(pathcpy, dest, CURPATH_SIZE-1);
-    strncat(pathcpy, "/", CURPATH_SIZE-1);
 
+    // Text files and executables
+    if (!isdir(pathcpy)) {
+        if (isexec(pathcpy))
+            execfile(pathcpy);
+        else
+            editfile(pathcpy);
+        free(pathcpy);
+        return;
+    }
+    
+    strncat(pathcpy, "/", CURPATH_SIZE-1);
+    
     //printf("Advancing to '%s'\n", pathcpy);
     DIR *new = opendir(pathcpy); 
     if (new == NULL) {
@@ -621,15 +689,15 @@ char *
 fontmisadventures(void) {
     FcConfig *conf = FcInitLoadConfigAndFonts();
 
-    char *fontpath = findfont(conf, "CascadiaCode");
+    char *fontpath = findfont(conf, FONT_OPTION_1);
     if (fontpath == NULL) {
         printf("Cascadia Code not found\n");
-        fontpath = findfont(conf, "FiraCode");
+        fontpath = findfont(conf, FONT_OPTION_2);
     }
 
     if (fontpath == NULL) {
         printf("Fira Code not found\n");
-        fontpath = findfont(conf, "monospace");
+        fontpath = findfont(conf, FONT_OPTION_3);
     }
 
     if (fontpath == NULL) {
